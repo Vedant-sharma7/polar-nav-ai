@@ -1,0 +1,4 @@
+[
+  { "id": "CPT", "name": "Cape Town Port", "lat": -33.92, "lon": 18.42, "type": "port" },
+  { "id": "BHA", "name": "Bharati Station", "lat": -69.40, "lon": 76.19, "type": "station" }
+]
