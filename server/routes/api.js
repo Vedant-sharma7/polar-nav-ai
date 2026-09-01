@@ -4,6 +4,7 @@ const router = express.Router();
 const stations = require('../data/stations.json');
 const hazards = require('../data/hazards.json');
 const { calculateVoyageMetrics } = require('../services/telemetry');
+const { findOptimalRoute } = require('../services/pathfinder');
 
 // 1. GET /api/v1/stations
 router.get('/stations', (req, res) => {
@@ -15,29 +16,29 @@ router.get('/hazards', (req, res) => {
   res.json(hazards);
 });
 
-// 3. POST /api/v1/routes/optimize (Now calculating telemetry math!)
+// 3. POST /api/v1/routes/optimize (Runs dynamic A* calculation)
 router.post('/routes/optimize', (req, res) => {
-  const icebergA23a = hazards.icebergs[0]; // Lat: -61.5, Lon: 50.2
+  // Default coordinates if not provided in the request body
+  const origin = req.body.origin || { lat: -33.92, lon: 18.42 };       // Cape Town
+  const destination = req.body.destination || { lat: -69.40, lon: 76.19 }; // Bharati Station
 
-  // A direct "naive" route: Cape Town -> Direct through Iceberg A-23a -> Bharati Station
-  const directPath = [
-    [-33.92, 18.42], // Cape Town
-    [-61.50, 50.20], // Straight into Iceberg A-23a
-    [-69.40, 76.19]  // Bharati Station
+  const icebergA23a = hazards.icebergs[0];
+
+  // A. Generate the Algorithmic Safe Route using A*
+  const optimalWaypoints = findOptimalRoute(origin, destination);
+
+  // B. Generate the Naive Direct Route (Straight line through the hazard zone)
+  const naiveWaypoints = [
+    [origin.lat, origin.lon],
+    [icebergA23a.lat, icebergA23a.lon], // Traverses directly through Iceberg A-23a
+    [destination.lat, destination.lon]
   ];
 
-  // A simulated "safe" bypass path avoiding the iceberg
-  const bypassPath = [
-    [-33.92, 18.42], // Cape Town
-    [-45.00, 30.00],
-    [-55.00, 42.00],
-    [-63.00, 65.00], // Swerves safely around the iceberg
-    [-69.40, 76.19]  // Bharati Station
-  ];
+  // C. Calculate physics and maritime telemetry for both routes
+  const directMetrics = calculateVoyageMetrics(naiveWaypoints, icebergA23a);
+  const safeMetrics = calculateVoyageMetrics(optimalWaypoints, icebergA23a);
 
-  const directMetrics = calculateVoyageMetrics(directPath, icebergA23a);
-  const safeMetrics = calculateVoyageMetrics(bypassPath, icebergA23a);
-
+  // D. Calculate relative fuel savings percentage
   const fuelSavedPercent = (
     ((directMetrics.fuelConsumptionTons - safeMetrics.fuelConsumptionTons) /
       directMetrics.fuelConsumptionTons) * 100
@@ -48,11 +49,11 @@ router.post('/routes/optimize', (req, res) => {
     comparison: {
       fuelSavedPercent: `${fuelSavedPercent}%`,
       directRoute: {
-        waypoints: directPath,
+        waypoints: naiveWaypoints,
         ...directMetrics
       },
       safeRoute: {
-        waypoints: bypassPath,
+        waypoints: optimalWaypoints,
         ...safeMetrics
       }
     }
