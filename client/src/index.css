@@ -10,11 +10,11 @@ html, body, #root {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background-color: #030712;
+  background-color: #020617;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* Fullscreen Leaflet Container with cinematic tone */
+/* Fullscreen Leaflet Container */
 .leaflet-container {
   width: 100vw;
   height: 100vh;
@@ -22,7 +22,42 @@ html, body, #root {
   z-index: 0;
 }
 
-/* Enhances contrast so white Antarctic ice and land pop against dark water */
+/* Enhances contrast so Antarctic ice and terrain pop against deep ocean */
 .leaflet-tile-pane {
   filter: brightness(0.85) contrast(1.25) saturate(0.9);
+}
+
+/* Custom Marker Styles (Zero default Leaflet pin artifacts) */
+.custom-station-pin {
+  background: transparent;
+  border: none;
+}
+
+/* Pulsing Radar Glow Animation */
+@keyframes radar-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(0, 240, 255, 0.7);
+  }
+  70% {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 10px rgba(0, 240, 255, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(0, 240, 255, 0);
+  }
+}
+
+.radar-glow {
+  animation: radar-pulse 2s infinite cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+/* Glowing Route Lines */
+.route-glow {
+  filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.9));
+}
+
+.route-danger-glow {
+  filter: drop-shadow(0 0 6px rgba(255, 42, 77, 0.8));
 }
