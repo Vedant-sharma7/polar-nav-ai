@@ -6,6 +6,8 @@ const hazards = require('../data/hazards.json');
 const { calculateVoyageMetrics } = require('../services/telemetry');
 const { findOptimalRoute } = require('../services/pathfinder');
 
+let activeSafeRoute = [];
+
 // 1. GET /api/v1/stations
 router.get('/stations', (req, res) => {
   res.json(stations);
@@ -37,6 +39,7 @@ router.post('/routes/optimize', (req, res) => {
   // C. Calculate physics and maritime telemetry for both routes
   const directMetrics = calculateVoyageMetrics(naiveWaypoints, icebergA23a);
   const safeMetrics = calculateVoyageMetrics(optimalWaypoints, icebergA23a);
+  activeSafeRoute = optimalWaypoints;
 
   // D. Calculate relative fuel savings percentage
   const fuelSavedPercent = (
@@ -57,6 +60,14 @@ router.post('/routes/optimize', (req, res) => {
         ...safeMetrics
       }
     }
+  });
+});
+
+// 4. GET /api/v1/routes/active
+router.get('/routes/active', (req, res) => {
+  res.json({
+    status: "success",
+    waypoints: activeSafeRoute
   });
 });
 

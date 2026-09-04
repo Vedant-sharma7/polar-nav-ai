@@ -69,6 +69,11 @@ export default function App() {
       const data = response.data.comparison;
       
       setSafeRoute(data.safeRoute.waypoints);
+      console.log("ROUTE FOR WEATHER:", data.safeRoute.waypoints);
+      localStorage.setItem(
+      "polarNavRoute",
+      JSON.stringify(data.safeRoute.waypoints)
+      );
       setRiskRoute(data.directRoute.waypoints);
       
       setMetrics({
