@@ -26,6 +26,20 @@ const createTacticalIcon = (label, color = '#00f0ff') => {
   });
 };
 
+// NEW: Glowing Ship Icon for the Live Animation
+const createShipIcon = () => {
+  return L.divIcon({
+    className: 'moving-ship-pin',
+    html: `
+      <div class="relative flex items-center justify-center w-8 h-8 drop-shadow-[0_0_12px_rgba(0,240,255,1)]">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#00f0ff" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(135deg);"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>
+      </div>
+    `,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+};
+
 export default function App() {
   const mapCenter = [-58.0, 35.0]; 
 
@@ -40,6 +54,9 @@ export default function App() {
   const [safeRoute, setSafeRoute] = useState([]);
   const [riskRoute, setRiskRoute] = useState([]);
   
+  // NEW: Live Ship Location State
+  const [liveShipPos, setLiveShipPos] = useState(null);
+
   const [metrics, setMetrics] = useState({
     status: "STANDBY",
     distance: "--",
@@ -53,7 +70,6 @@ export default function App() {
   const [liveSpeed, setLiveSpeed] = useState(18.2);
   const [liveCurrent, setLiveCurrent] = useState(1.1);
 
-  // NEW: Weather GPT States
   const [showAiTerminal, setShowAiTerminal] = useState(false);
   const [aiText, setAiText] = useState("");
   const [isAiTyping, setIsAiTyping] = useState(false);
@@ -73,7 +89,6 @@ export default function App() {
 > AI RECOMMENDATION:
 > Direct trajectory is HIGH RISK. Engaging A* heuristic to calculate evasive multi-node detour. Proceed with caution.`;
 
-  // AI Typewriter Effect
   useEffect(() => {
     if (isAiTyping) {
       let i = 0;
@@ -106,6 +121,27 @@ export default function App() {
     return () => clearInterval(interval);
   }, [metrics.status, liveEnvironment]);
 
+  // NEW: Ship Animation Logic (Moves radar-style along the route)
+  useEffect(() => {
+    let moveShip;
+    if (metrics.status === "ACTIVE" && safeRoute.length > 0) {
+      let currentStep = 0;
+      setLiveShipPos(safeRoute[0]); // Start at origin
+
+      moveShip = setInterval(() => {
+        currentStep++;
+        if (currentStep < safeRoute.length) {
+          setLiveShipPos(safeRoute[currentStep]); // Jump to next waypoint
+        } else {
+          clearInterval(moveShip); // Ship arrived
+        }
+      }, 1500); // Ship advances every 1.5 seconds
+    } else {
+      setLiveShipPos(null);
+    }
+    return () => clearInterval(moveShip);
+  }, [metrics.status, safeRoute]); // Restarts animation if route changes (e.g., Weather GPT runs)
+
   const stationCoords = {
     'CPT': { lat: -33.92, lon: 18.42 },
     'BHR': { lat: -69.40, lon: 76.19 },
@@ -118,7 +154,11 @@ export default function App() {
 
   const packIcePolygon = [[-66.0, 60.0], [-65.5, 70.0], [-68.0, 72.0], [-67.5, 62.0]];
   const flashFreezePolygon = [[-61.5, 48.0], [-61.0, 52.0], [-63.5, 53.5], [-64.0, 49.0]];
-  const tacticalDetour = [[-58.0, 41.0], [-59.5, 55.0], [-65.2, 57.0]];
+  
+  // Adjusted Detour to have more waypoints so the ship animation looks cooler
+  const tacticalDetour = [
+    [-58.0, 41.0], [-58.5, 48.0], [-59.5, 55.0], [-62.0, 56.5], [-65.2, 57.0]
+  ];
 
   const handleOptimize = async () => {
     setIsOptimizing(true);
@@ -131,6 +171,17 @@ export default function App() {
       const data = response.data.comparison;
       
       let finalSafeRoute = data.safeRoute.waypoints;
+      
+      // Override route for Swarm Link Detour
+      if (swarmActive) {
+         finalSafeRoute = [
+           stationCoords[origin], [-40.5, 24.0], [-47.0, 31.0], [-53.0, 38.5], 
+           ...tacticalDetour, 
+           [-68.0, 68.0], stationCoords[destination]
+         ];
+      }
+      
+      // Override route for Weather GPT
       if (liveEnvironment) {
         finalSafeRoute = [
           stationCoords[origin], [-40.5, 15.0], [-50.0, 20.0], [-55.0, 30.0], [-65.0, 45.0], stationCoords[destination]
@@ -142,11 +193,11 @@ export default function App() {
       
       setMetrics({
         status: "ACTIVE",
-        distance: liveEnvironment ? "4,120 NM" : data.safeRoute.totalDistanceNM,
-        fuelSaved: liveEnvironment ? "+4.1%" : data.fuelSavedPercent,
+        distance: liveEnvironment ? "4,120 NM" : (swarmActive ? "3,480 NM" : data.safeRoute.totalDistanceNM),
+        fuelSaved: liveEnvironment ? "+4.1%" : (swarmActive ? "-1.2%" : data.fuelSavedPercent),
         risk: liveEnvironment ? "SEVERE WEATHER" : data.safeRoute.safetyStatus,
         eta: liveEnvironment ? "11.2 DAYS" : data.safeRoute.etaDays,
-        fuelColor: "text-emerald-400",
+        fuelColor: swarmActive ? "text-amber-400" : "text-emerald-400",
         riskColor: liveEnvironment ? 'text-amber-500' : (data.safeRoute.safetyStatus === 'SAFE TRAJECTORY' ? 'text-cyan-400' : 'text-red-500')
       });
     } catch (error) {
@@ -197,16 +248,22 @@ export default function App() {
           <>
             <Polygon positions={flashFreezePolygon} pathOptions={{ color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.4, dashArray: '4, 4' }} />
             <Polyline positions={tacticalDetour} pathOptions={{ color: '#f59e0b', weight: 4, dashArray: '8, 8', opacity: 0.9, lineCap: 'round' }} />
-            <Marker position={[-60.5, 46.0]} icon={createTacticalIcon('Lead Icebreaker', '#f59e0b')} />
+            <Marker position={[-59.5, 55.0]} icon={createTacticalIcon('Lead Icebreaker', '#f59e0b')} />
           </>
         )}
 
         {riskRoute.length > 0 && <Polyline positions={riskRoute} className="route-danger-glow" pathOptions={{ color: '#ff2a4d', weight: 2, dashArray: '8, 10', opacity: 0.8 }} />}
+        
         {safeRoute.length > 0 && (
           <>
             <Polyline positions={safeRoute} pathOptions={{ color: '#00f0ff', weight: 9, opacity: 0.3, lineCap: 'round', lineJoin: 'round' }} />
             <Polyline positions={safeRoute} className="route-glow transition-all duration-1000" pathOptions={{ color: '#ffffff', weight: 3.5, opacity: swarmActive ? 0.4 : 0.95, lineCap: 'round', lineJoin: 'round' }} />
           </>
+        )}
+
+        {/* NEW: The Live Animated Ship Marker */}
+        {liveShipPos && (
+          <Marker position={liveShipPos} icon={createShipIcon()} zIndexOffset={1000} />
         )}
 
         <Marker position={stationCoords['CPT']} icon={createTacticalIcon('Cape Town', '#00f0ff')} />
@@ -273,7 +330,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* NEW: BOTTOM-LEFT WEATHER GPT TERMINAL */}
       {showAiTerminal && (
         <div className="absolute bottom-8 left-8 z-[1000] w-80 bg-[#0a0f1d]/85 backdrop-blur-2xl border border-purple-500/40 rounded-2xl p-4 shadow-[0_15px_45px_rgba(168,85,247,0.15)] animate-in fade-in slide-in-from-left-4 duration-300">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-purple-500/20">
@@ -292,7 +348,6 @@ export default function App() {
         </div>
       )}
 
-      {/* TOP-RIGHT ICEBERG INTEL PANEL */}
       {showIntel && (
         <div className="absolute top-8 right-8 z-[1000] w-72 bg-[#0a0f1d]/75 backdrop-blur-2xl border border-red-500/30 rounded-2xl p-4 shadow-[0_15px_45px_rgba(255,42,77,0.15)] animate-in fade-in slide-in-from-right-4 duration-300">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-red-500/20">
@@ -311,7 +366,6 @@ export default function App() {
         </div>
       )}
 
-      {/* BOTTOM-RIGHT HUD */}
       <div className="absolute bottom-8 right-8 z-[1000] w-[700px] bg-[#0a0f1d]/70 backdrop-blur-2xl border border-white/15 rounded-2xl p-4 shadow-[0_15px_45px_rgba(0,0,0,0.8)]">
         <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3 text-[11px] tracking-wider text-slate-300">
           <div className="flex items-center gap-2">
