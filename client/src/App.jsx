@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Polygon, Polyline, Marker, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Polygon, Polyline, Marker, Tooltip, Circle } from 'react-leaflet';
 import L from 'leaflet';
 import axios from 'axios';
 import 'leaflet/dist/leaflet.css';
 import { 
-  Anchor, Compass, Gauge, Waves, Droplets, ShieldCheck, Navigation2, Activity, Layers, Database, Wifi
+  Anchor, Compass, Gauge, Waves, Droplets, ShieldCheck, Navigation2, Activity, Layers, Database, Wifi, Satellite, CloudLightning
 } from 'lucide-react';
 
 const createTacticalIcon = (label, color = '#00f0ff') => {
@@ -34,8 +34,10 @@ export default function App() {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [showIntel, setShowIntel] = useState(false);
   
-  // NEW: Swarm Intelligence State
   const [swarmActive, setSwarmActive] = useState(false);
+  
+  // NEW: Live Environmental State
+  const [liveEnvironment, setLiveEnvironment] = useState(false);
 
   const [safeRoute, setSafeRoute] = useState([]);
   const [riskRoute, setRiskRoute] = useState([]);
@@ -57,15 +59,19 @@ export default function App() {
     let interval;
     if (metrics.status === "ACTIVE") {
       interval = setInterval(() => {
-        setLiveSpeed((17.5 + Math.random() * 1.0).toFixed(1));
-        setLiveCurrent((0.8 + Math.random() * 0.6).toFixed(1));
+        // If weather is bad, speed drops drastically
+        const baseSpeed = liveEnvironment ? 12.5 : 17.5;
+        const baseCurrent = liveEnvironment ? 3.5 : 0.8;
+        
+        setLiveSpeed((baseSpeed + Math.random() * 1.0).toFixed(1));
+        setLiveCurrent((baseCurrent + Math.random() * 0.6).toFixed(1));
       }, 2000);
     } else {
       setLiveSpeed(0.0);
       setLiveCurrent(1.1);
     }
     return () => clearInterval(interval);
-  }, [metrics.status]);
+  }, [metrics.status, liveEnvironment]);
 
   const stationCoords = {
     'CPT': { lat: -33.92, lon: 18.42 },
@@ -73,21 +79,18 @@ export default function App() {
     'MAI': { lat: -70.76, lon: 11.73 }
   };
 
-  const a23aPolygon = [
-    [-59.0, 42.0], [-58.5, 54.0], [-62.5, 58.0], [-65.0, 52.0], [-64.0, 38.0]
+  // DYNAMIC HAZARDS: Coordinates shift if liveEnvironment is active
+  const a23aPolygon = liveEnvironment 
+    ? [[-57.0, 44.0], [-56.5, 56.0], [-60.5, 60.0], [-63.0, 54.0], [-62.0, 40.0]] // Shifted East & North (Drifting)
+    : [[-59.0, 42.0], [-58.5, 54.0], [-62.5, 58.0], [-65.0, 52.0], [-64.0, 38.0]]; // Original static position
+
+  // New Pack Ice that only appears in Live Mode
+  const packIcePolygon = [
+    [-66.0, 60.0], [-65.5, 70.0], [-68.0, 72.0], [-67.5, 62.0]
   ];
 
-  // NEW: Dynamic Swarm Hazard (Flash Freeze detected by lead ship)
-  const flashFreezePolygon = [
-    [-61.5, 48.0], [-61.0, 52.0], [-63.5, 53.5], [-64.0, 49.0]
-  ];
-
-  // NEW: Tactical Detour calculated to avoid the Flash Freeze
-  const tacticalDetour = [
-    [-58.0, 41.0], // Branches off safeRoute
-    [-59.5, 55.0], // Swings wide east
-    [-65.2, 57.0], // Reconnects with safeRoute
-  ];
+  const flashFreezePolygon = [[-61.5, 48.0], [-61.0, 52.0], [-63.5, 53.5], [-64.0, 49.0]];
+  const tacticalDetour = [[-58.0, 41.0], [-59.5, 55.0], [-65.2, 57.0]];
 
   const handleOptimize = async () => {
     setIsOptimizing(true);
@@ -99,17 +102,31 @@ export default function App() {
       
       const data = response.data.comparison;
       
-      setSafeRoute(data.safeRoute.waypoints);
+      // HACKATHON MAGIC: If Live Environment is on, we programmatically bend the backend's route 
+      // to weave around the new weather/ice conditions without breaking the server.
+      let finalSafeRoute = data.safeRoute.waypoints;
+      if (liveEnvironment) {
+        finalSafeRoute = [
+          stationCoords[origin],
+          [-40.5, 15.0], // Swings far west to avoid the storm cell
+          [-50.0, 20.0],
+          [-55.0, 30.0], // Approaches from a completely different angle
+          [-65.0, 45.0], // Dodges the drifted iceberg
+          stationCoords[destination]
+        ];
+      }
+      
+      setSafeRoute(finalSafeRoute);
       setRiskRoute(data.directRoute.waypoints);
       
       setMetrics({
         status: "ACTIVE",
-        distance: data.safeRoute.totalDistanceNM,
-        fuelSaved: data.fuelSavedPercent,
-        risk: data.safeRoute.safetyStatus,
-        eta: data.safeRoute.etaDays,
+        distance: liveEnvironment ? "4,120 NM" : data.safeRoute.totalDistanceNM,
+        fuelSaved: liveEnvironment ? "+4.1%" : data.fuelSavedPercent,
+        risk: liveEnvironment ? "SEVERE WEATHER" : data.safeRoute.safetyStatus,
+        eta: liveEnvironment ? "11.2 DAYS" : data.safeRoute.etaDays,
         fuelColor: "text-emerald-400",
-        riskColor: data.safeRoute.safetyStatus === 'SAFE TRAJECTORY' ? 'text-cyan-400' : 'text-red-500'
+        riskColor: liveEnvironment ? 'text-amber-500' : (data.safeRoute.safetyStatus === 'SAFE TRAJECTORY' ? 'text-cyan-400' : 'text-red-500')
       });
     } catch (error) {
       console.error("Backend connection failed", error);
@@ -123,34 +140,51 @@ export default function App() {
       <MapContainer center={mapCenter} zoom={3.5} minZoom={2} maxZoom={7} zoomControl={false} className="w-full h-full z-0">
         <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" maxZoom={18} />
 
-        {/* Core A-23a Hazard */}
+        {/* Dynamic Storm Cell (Only visible in Live Env Mode) */}
+        {liveEnvironment && (
+          <Circle 
+            center={[-47.0, 31.0]} 
+            radius={600000} 
+            pathOptions={{ color: '#3b82f6', fillColor: '#60a5fa', fillOpacity: 0.3, weight: 1, dashArray: '10, 10' }}
+          >
+            <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-blue-300 font-bold text-[10px] uppercase tracking-widest pointer-events-none">
+              <div className="flex flex-col items-center gap-1">
+                <CloudLightning size={16} />
+                <span>Category 4 Sea Storm</span>
+                <span>Wind Shear: 65 kts</span>
+              </div>
+            </Tooltip>
+          </Circle>
+        )}
+
+        {/* Core A-23a Hazard (Moves dynamically!) */}
         <Polygon 
           positions={a23aPolygon} 
           eventHandlers={{ click: () => setShowIntel(!showIntel) }} 
-          pathOptions={{ color: '#ff2a4d', weight: 2, fillColor: '#ff2a4d', fillOpacity: 0.35, dashArray: '6, 6', className: 'cursor-pointer' }}
+          pathOptions={{ color: '#ff2a4d', weight: 2, fillColor: '#ff2a4d', fillOpacity: 0.35, dashArray: '6, 6', className: 'cursor-pointer transition-all duration-1000' }}
         >
           <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-red-400 font-bold text-xs uppercase tracking-widest pointer-events-none">
-            A-23a Hazard Zone
+            {liveEnvironment ? "A-23a (DRIFT DETECTED)" : "A-23a Hazard Zone"}
           </Tooltip>
         </Polygon>
 
-        {/* SWARM LINK: Dynamic Hazard & Detour */}
-        {swarmActive && safeRoute.length > 0 && (
+        {/* Secondary Pack Ice Hazard (Only visible in Live Env Mode) */}
+        {liveEnvironment && (
+          <Polygon positions={packIcePolygon} pathOptions={{ color: '#93c5fd', weight: 2, fillColor: '#93c5fd', fillOpacity: 0.4, dashArray: '4, 4' }}>
+            <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-blue-300 font-bold text-[10px] uppercase tracking-widest pointer-events-none">
+              Heavy Pack Ice
+            </Tooltip>
+          </Polygon>
+        )}
+
+        {swarmActive && safeRoute.length > 0 && !liveEnvironment && (
           <>
-            <Polygon positions={flashFreezePolygon} pathOptions={{ color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.4, dashArray: '4, 4' }}>
-              <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-amber-400 font-bold text-xs uppercase tracking-widest pointer-events-none">
-                Flash Freeze Detected
-              </Tooltip>
-            </Polygon>
-            
+            <Polygon positions={flashFreezePolygon} pathOptions={{ color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.4, dashArray: '4, 4' }} />
             <Polyline positions={tacticalDetour} pathOptions={{ color: '#f59e0b', weight: 4, dashArray: '8, 8', opacity: 0.9, lineCap: 'round' }} />
-            
-            {/* Lead Icebreaker Marker */}
             <Marker position={[-60.5, 46.0]} icon={createTacticalIcon('Lead Icebreaker', '#f59e0b')} />
           </>
         )}
 
-        {/* Base Routes */}
         {riskRoute.length > 0 && (
           <Polyline positions={riskRoute} className="route-danger-glow" pathOptions={{ color: '#ff2a4d', weight: 2, dashArray: '8, 10', opacity: 0.8 }} />
         )}
@@ -158,7 +192,7 @@ export default function App() {
         {safeRoute.length > 0 && (
           <>
             <Polyline positions={safeRoute} pathOptions={{ color: '#00f0ff', weight: 9, opacity: 0.3, lineCap: 'round', lineJoin: 'round' }} />
-            <Polyline positions={safeRoute} className="route-glow" pathOptions={{ color: '#ffffff', weight: 3.5, opacity: swarmActive ? 0.4 : 0.95, lineCap: 'round', lineJoin: 'round' }} />
+            <Polyline positions={safeRoute} className="route-glow transition-all duration-1000" pathOptions={{ color: '#ffffff', weight: 3.5, opacity: swarmActive ? 0.4 : 0.95, lineCap: 'round', lineJoin: 'round' }} />
           </>
         )}
 
@@ -203,18 +237,36 @@ export default function App() {
             {isOptimizing ? 'COMPUTING...' : 'ACTIVATE ROUTE'}
           </button>
 
-          {/* NEW: Swarm Intelligence Toggle */}
-          <button 
-            onClick={() => setSwarmActive(!swarmActive)} 
-            disabled={metrics.status !== "ACTIVE"}
-            className={`w-full mt-1 py-2 px-4 border rounded-xl text-[10px] font-bold tracking-widest uppercase transition-all duration-300 flex items-center justify-center gap-2 ${
-              metrics.status !== "ACTIVE" ? 'bg-slate-800/20 border-slate-700 text-slate-600 cursor-not-allowed' :
-              swarmActive ? 'bg-amber-500/20 border-amber-500/60 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-slate-800/40 border-slate-600 hover:border-slate-400 text-slate-300'
-            }`}
-          >
-            <Wifi size={12} className={swarmActive ? 'animate-pulse' : ''} />
-            {swarmActive ? 'SWARM DATA LINK ACTIVE' : 'ENABLE SWARM LINK'}
-          </button>
+          {/* NEW: LIVE SATELLITE SYNC TOGGLE */}
+          <div className="flex gap-2 mt-2">
+            <button 
+              onClick={() => {
+                setLiveEnvironment(!liveEnvironment);
+                setSwarmActive(false); // Turn off swarm to avoid visual clutter
+              }} 
+              className={`flex-1 py-2 px-2 border rounded-xl text-[9px] font-bold tracking-widest uppercase transition-all duration-300 flex flex-col items-center justify-center gap-1 ${
+                liveEnvironment ? 'bg-blue-500/20 border-blue-500/60 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.2)]' : 'bg-slate-800/40 border-slate-600 hover:border-slate-400 text-slate-300'
+              }`}
+            >
+              <Satellite size={14} className={liveEnvironment ? 'animate-pulse' : ''} />
+              {liveEnvironment ? 'SAT SYNC ON' : 'SYNC METEOSAT'}
+            </button>
+
+            <button 
+              onClick={() => {
+                setSwarmActive(!swarmActive);
+                setLiveEnvironment(false);
+              }} 
+              disabled={metrics.status !== "ACTIVE"}
+              className={`flex-1 py-2 px-2 border rounded-xl text-[9px] font-bold tracking-widest uppercase transition-all duration-300 flex flex-col items-center justify-center gap-1 ${
+                metrics.status !== "ACTIVE" ? 'bg-slate-800/20 border-slate-700 text-slate-600 cursor-not-allowed' :
+                swarmActive ? 'bg-amber-500/20 border-amber-500/60 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-slate-800/40 border-slate-600 hover:border-slate-400 text-slate-300'
+              }`}
+            >
+              <Wifi size={14} className={swarmActive ? 'animate-pulse' : ''} />
+              {swarmActive ? 'SWARM ON' : 'SWARM LINK'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -242,13 +294,9 @@ export default function App() {
               <span className="text-slate-400">UNDERWATER DRAFT:</span>
               <span className="text-red-400 font-bold">280 METERS (CRITICAL)</span>
             </div>
-            <div className="flex justify-between border-b border-white/5 pb-1">
-              <span className="text-slate-400">EST. TOTAL MASS:</span>
-              <span className="text-white">~1.2 Billion Tons</span>
-            </div>
             <div className="flex justify-between">
               <span className="text-slate-400">DRIFT TRAJECTORY:</span>
-              <span className="text-amber-300">0.8 kts NW</span>
+              <span className="text-amber-300">{liveEnvironment ? '1.4 kts NE (ACCELERATING)' : '0.8 kts NW'}</span>
             </div>
           </div>
         </div>
@@ -274,7 +322,7 @@ export default function App() {
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><Gauge size={10} className="text-cyan-400" /> Speed</span>
-            <p className="text-xs font-bold text-white mt-1">{liveSpeed} <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
+            <p className={`text-xs font-bold mt-1 ${liveEnvironment ? 'text-amber-400' : 'text-white'}`}>{liveSpeed} <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><Compass size={10} className="text-cyan-400" /> Heading</span>
@@ -282,7 +330,7 @@ export default function App() {
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><Waves size={10} className="text-cyan-400" /> Current</span>
-            <p className="text-xs font-bold text-white mt-1">{liveCurrent} <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
+            <p className={`text-xs font-bold mt-1 ${liveEnvironment ? 'text-red-400' : 'text-white'}`}>{liveCurrent} <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><ShieldCheck size={10} className="text-cyan-400" /> Fuel Saved</span>
@@ -302,7 +350,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-slate-400">RISK:</span>
-            <span className={`px-2 py-0.5 rounded border font-bold text-[9px] ${swarmActive ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : (metrics.risk === 'SAFE TRAJECTORY' ? 'bg-cyan-400/10 border-cyan-400/40 text-cyan-300' : 'bg-red-500/10 border-red-500/40 text-red-500')}`}>
+            <span className={`px-2 py-0.5 rounded border font-bold text-[9px] ${metrics.risk === 'SEVERE WEATHER' ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : (metrics.risk === 'SAFE TRAJECTORY' ? 'bg-cyan-400/10 border-cyan-400/40 text-cyan-300' : 'bg-red-500/10 border-red-500/40 text-red-500')}`}>
               {swarmActive ? 'DETOUR ENGAGED' : metrics.risk}
             </span>
           </div>
