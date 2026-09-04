@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Polygon, Polyline, Marker, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import axios from 'axios';
 import 'leaflet/dist/leaflet.css';
 import { 
-  Anchor, Compass, Gauge, Waves, Droplets, ShieldCheck, Navigation2, Activity, Layers
+  Anchor, Compass, Gauge, Waves, Droplets, ShieldCheck, Navigation2, Activity, Layers, Info, Database
 } from 'lucide-react';
 
 const createTacticalIcon = (label, color = '#00f0ff') => {
@@ -32,6 +32,7 @@ export default function App() {
   const [origin, setOrigin] = useState('CPT');
   const [destination, setDestination] = useState('BHR');
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [showIntel, setShowIntel] = useState(false); // Controls the new Iceberg Data panel
 
   const [safeRoute, setSafeRoute] = useState([]);
   const [riskRoute, setRiskRoute] = useState([]);
@@ -46,7 +47,27 @@ export default function App() {
     riskColor: "text-slate-400"
   });
 
-  // Coordinate Dictionary for the API Payload
+  // Dynamic Live Sensor States
+  const [liveSpeed, setLiveSpeed] = useState(18.2);
+  const [liveCurrent, setLiveCurrent] = useState(1.1);
+
+  // Fluctuating Data Effect: Runs only when the route is ACTIVE
+  useEffect(() => {
+    let interval;
+    if (metrics.status === "ACTIVE") {
+      interval = setInterval(() => {
+        // Randomize speed slightly between 17.5 and 18.5
+        setLiveSpeed((17.5 + Math.random() * 1.0).toFixed(1));
+        // Randomize ocean current between 0.8 and 1.4
+        setLiveCurrent((0.8 + Math.random() * 0.6).toFixed(1));
+      }, 2000);
+    } else {
+      setLiveSpeed(0.0);
+      setLiveCurrent(1.1);
+    }
+    return () => clearInterval(interval);
+  }, [metrics.status]);
+
   const stationCoords = {
     'CPT': { lat: -33.92, lon: 18.42 },
     'BHR': { lat: -69.40, lon: 76.19 },
@@ -60,7 +81,6 @@ export default function App() {
   const handleOptimize = async () => {
     setIsOptimizing(true);
     try {
-      // Now dynamically sending the selected coordinates to the backend
       const response = await axios.post('http://localhost:5000/api/v1/routes/optimize', {
         origin: stationCoords[origin],
         destination: stationCoords[destination]
@@ -92,7 +112,12 @@ export default function App() {
       <MapContainer center={mapCenter} zoom={3.5} minZoom={2} maxZoom={7} zoomControl={false} className="w-full h-full z-0">
         <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" maxZoom={18} />
 
-        <Polygon positions={a23aPolygon} pathOptions={{ color: '#ff2a4d', weight: 2, fillColor: '#ff2a4d', fillOpacity: 0.35, dashArray: '6, 6' }}>
+        <Polygon 
+          positions={a23aPolygon} 
+          // Click handler to open the HOD's requested data panel
+          eventHandlers={{ click: () => setShowIntel(!showIntel) }} 
+          pathOptions={{ color: '#ff2a4d', weight: 2, fillColor: '#ff2a4d', fillOpacity: 0.35, dashArray: '6, 6', className: 'cursor-pointer' }}
+        >
           <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-red-400 font-bold text-xs uppercase tracking-widest pointer-events-none">
             A-23a Hazard Zone
           </Tooltip>
@@ -152,6 +177,42 @@ export default function App() {
         </div>
       </div>
 
+      {/* NEW: TOP-RIGHT ICEBERG INTEL PANEL (Shows when polygon is clicked) */}
+      {showIntel && (
+        <div className="absolute top-8 right-8 z-[1000] w-72 bg-[#0a0f1d]/75 backdrop-blur-2xl border border-red-500/30 rounded-2xl p-4 shadow-[0_15px_45px_rgba(255,42,77,0.15)] animate-in fade-in slide-in-from-right-4 duration-300">
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-red-500/20">
+            <div className="flex items-center gap-2 text-red-400">
+              <Database size={14} />
+              <h2 className="text-xs font-bold tracking-widest uppercase">Target Intel: A-23a</h2>
+            </div>
+            <button onClick={() => setShowIntel(false)} className="text-slate-400 hover:text-white">✕</button>
+          </div>
+          
+          <div className="space-y-2 text-[10px] tracking-wider">
+            <div className="flex justify-between border-b border-white/5 pb-1">
+              <span className="text-slate-400">DATA SOURCE:</span>
+              <span className="text-cyan-300">IIT-M / NCPOR (2025)</span>
+            </div>
+            <div className="flex justify-between border-b border-white/5 pb-1">
+              <span className="text-slate-400">VISIBLE SURFACE MASS:</span>
+              <span className="text-white">12.5%</span>
+            </div>
+            <div className="flex justify-between border-b border-white/5 pb-1">
+              <span className="text-slate-400">UNDERWATER DRAFT:</span>
+              <span className="text-red-400 font-bold">280 METERS (CRITICAL)</span>
+            </div>
+            <div className="flex justify-between border-b border-white/5 pb-1">
+              <span className="text-slate-400">EST. TOTAL MASS:</span>
+              <span className="text-white">~1.2 Billion Tons</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">DRIFT TRAJECTORY:</span>
+              <span className="text-amber-300">0.8 kts NW (Shifting)</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* BOTTOM-RIGHT HUD */}
       <div className="absolute bottom-8 right-8 z-[1000] w-[700px] bg-[#0a0f1d]/70 backdrop-blur-2xl border border-white/15 rounded-2xl p-4 shadow-[0_15px_45px_rgba(0,0,0,0.8)]">
         <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3 text-[11px] tracking-wider text-slate-300">
@@ -172,7 +233,8 @@ export default function App() {
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><Gauge size={10} className="text-cyan-400" /> Speed</span>
-            <p className="text-xs font-bold text-white mt-1">18.2 <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
+            {/* Now using dynamic liveSpeed state */}
+            <p className="text-xs font-bold text-white mt-1">{liveSpeed} <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><Compass size={10} className="text-cyan-400" /> Heading</span>
@@ -180,7 +242,8 @@ export default function App() {
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><Waves size={10} className="text-cyan-400" /> Current</span>
-            <p className="text-xs font-bold text-white mt-1">1.1 <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
+            {/* Now using dynamic liveCurrent state */}
+            <p className="text-xs font-bold text-white mt-1">{liveCurrent} <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><ShieldCheck size={10} className="text-cyan-400" /> Fuel Saved</span>
