@@ -4,7 +4,7 @@ import L from 'leaflet';
 import axios from 'axios';
 import 'leaflet/dist/leaflet.css';
 import { 
-  Anchor, Compass, Gauge, Waves, Droplets, ShieldCheck, Navigation2, Activity, Layers, Database, Wifi, Satellite, CloudLightning
+  Anchor, Compass, Gauge, Waves, Droplets, ShieldCheck, Navigation2, Activity, Layers, Database, Wifi, Satellite, CloudLightning, Cpu, Terminal
 } from 'lucide-react';
 
 const createTacticalIcon = (label, color = '#00f0ff') => {
@@ -35,8 +35,6 @@ export default function App() {
   const [showIntel, setShowIntel] = useState(false);
   
   const [swarmActive, setSwarmActive] = useState(false);
-  
-  // NEW: Live Environmental State
   const [liveEnvironment, setLiveEnvironment] = useState(false);
 
   const [safeRoute, setSafeRoute] = useState([]);
@@ -55,14 +53,49 @@ export default function App() {
   const [liveSpeed, setLiveSpeed] = useState(18.2);
   const [liveCurrent, setLiveCurrent] = useState(1.1);
 
+  // NEW: Weather GPT States
+  const [showAiTerminal, setShowAiTerminal] = useState(false);
+  const [aiText, setAiText] = useState("");
+  const [isAiTyping, setIsAiTyping] = useState(false);
+
+  const fullAiResponse = `> SYSTEM ALERT: Synthesizing ISRO Meteosat-9 telemetry...
+> 
+> METEOROLOGICAL THREAT DETECTED:
+> Category 4 cyclonic system forming at 47°S 31°E. 
+> Sustained wind shear: 65 knots. 
+> Visibility: < 500 meters (Heavy Blizzard).
+> 
+> HAZARD ANALYSIS:
+> Iceberg A-23a drift velocity increased by 0.6 kts due to surface currents. 
+> Sub-surface draft mapping indicates high risk of keel dragging.
+> Sea-ice pack density ahead is 38%.
+> 
+> AI RECOMMENDATION:
+> Direct trajectory is HIGH RISK. Engaging A* heuristic to calculate evasive multi-node detour. Proceed with caution.`;
+
+  // AI Typewriter Effect
+  useEffect(() => {
+    if (isAiTyping) {
+      let i = 0;
+      setAiText("");
+      const timer = setInterval(() => {
+        setAiText(fullAiResponse.slice(0, i));
+        i++;
+        if (i > fullAiResponse.length) {
+          clearInterval(timer);
+          setIsAiTyping(false);
+        }
+      }, 25);
+      return () => clearInterval(timer);
+    }
+  }, [isAiTyping]);
+
   useEffect(() => {
     let interval;
     if (metrics.status === "ACTIVE") {
       interval = setInterval(() => {
-        // If weather is bad, speed drops drastically
         const baseSpeed = liveEnvironment ? 12.5 : 17.5;
         const baseCurrent = liveEnvironment ? 3.5 : 0.8;
-        
         setLiveSpeed((baseSpeed + Math.random() * 1.0).toFixed(1));
         setLiveCurrent((baseCurrent + Math.random() * 0.6).toFixed(1));
       }, 2000);
@@ -79,16 +112,11 @@ export default function App() {
     'MAI': { lat: -70.76, lon: 11.73 }
   };
 
-  // DYNAMIC HAZARDS: Coordinates shift if liveEnvironment is active
   const a23aPolygon = liveEnvironment 
-    ? [[-57.0, 44.0], [-56.5, 56.0], [-60.5, 60.0], [-63.0, 54.0], [-62.0, 40.0]] // Shifted East & North (Drifting)
-    : [[-59.0, 42.0], [-58.5, 54.0], [-62.5, 58.0], [-65.0, 52.0], [-64.0, 38.0]]; // Original static position
+    ? [[-57.0, 44.0], [-56.5, 56.0], [-60.5, 60.0], [-63.0, 54.0], [-62.0, 40.0]] 
+    : [[-59.0, 42.0], [-58.5, 54.0], [-62.5, 58.0], [-65.0, 52.0], [-64.0, 38.0]]; 
 
-  // New Pack Ice that only appears in Live Mode
-  const packIcePolygon = [
-    [-66.0, 60.0], [-65.5, 70.0], [-68.0, 72.0], [-67.5, 62.0]
-  ];
-
+  const packIcePolygon = [[-66.0, 60.0], [-65.5, 70.0], [-68.0, 72.0], [-67.5, 62.0]];
   const flashFreezePolygon = [[-61.5, 48.0], [-61.0, 52.0], [-63.5, 53.5], [-64.0, 49.0]];
   const tacticalDetour = [[-58.0, 41.0], [-59.5, 55.0], [-65.2, 57.0]];
 
@@ -102,17 +130,10 @@ export default function App() {
       
       const data = response.data.comparison;
       
-      // HACKATHON MAGIC: If Live Environment is on, we programmatically bend the backend's route 
-      // to weave around the new weather/ice conditions without breaking the server.
       let finalSafeRoute = data.safeRoute.waypoints;
       if (liveEnvironment) {
         finalSafeRoute = [
-          stationCoords[origin],
-          [-40.5, 15.0], // Swings far west to avoid the storm cell
-          [-50.0, 20.0],
-          [-55.0, 30.0], // Approaches from a completely different angle
-          [-65.0, 45.0], // Dodges the drifted iceberg
-          stationCoords[destination]
+          stationCoords[origin], [-40.5, 15.0], [-50.0, 20.0], [-55.0, 30.0], [-65.0, 45.0], stationCoords[destination]
         ];
       }
       
@@ -135,40 +156,35 @@ export default function App() {
     setIsOptimizing(false);
   };
 
+  const triggerWeatherGPT = () => {
+    setLiveEnvironment(true);
+    setSwarmActive(false);
+    setShowAiTerminal(true);
+    setIsAiTyping(true);
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black select-none font-mono">
       <MapContainer center={mapCenter} zoom={3.5} minZoom={2} maxZoom={7} zoomControl={false} className="w-full h-full z-0">
         <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" maxZoom={18} />
 
-        {/* Dynamic Storm Cell (Only visible in Live Env Mode) */}
         {liveEnvironment && (
-          <Circle 
-            center={[-47.0, 31.0]} 
-            radius={600000} 
-            pathOptions={{ color: '#3b82f6', fillColor: '#60a5fa', fillOpacity: 0.3, weight: 1, dashArray: '10, 10' }}
-          >
+          <Circle center={[-47.0, 31.0]} radius={600000} pathOptions={{ color: '#3b82f6', fillColor: '#60a5fa', fillOpacity: 0.3, weight: 1, dashArray: '10, 10' }}>
             <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-blue-300 font-bold text-[10px] uppercase tracking-widest pointer-events-none">
               <div className="flex flex-col items-center gap-1">
                 <CloudLightning size={16} />
                 <span>Category 4 Sea Storm</span>
-                <span>Wind Shear: 65 kts</span>
               </div>
             </Tooltip>
           </Circle>
         )}
 
-        {/* Core A-23a Hazard (Moves dynamically!) */}
-        <Polygon 
-          positions={a23aPolygon} 
-          eventHandlers={{ click: () => setShowIntel(!showIntel) }} 
-          pathOptions={{ color: '#ff2a4d', weight: 2, fillColor: '#ff2a4d', fillOpacity: 0.35, dashArray: '6, 6', className: 'cursor-pointer transition-all duration-1000' }}
-        >
+        <Polygon positions={a23aPolygon} eventHandlers={{ click: () => setShowIntel(!showIntel) }} pathOptions={{ color: '#ff2a4d', weight: 2, fillColor: '#ff2a4d', fillOpacity: 0.35, dashArray: '6, 6', className: 'cursor-pointer transition-all duration-1000' }}>
           <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-red-400 font-bold text-xs uppercase tracking-widest pointer-events-none">
             {liveEnvironment ? "A-23a (DRIFT DETECTED)" : "A-23a Hazard Zone"}
           </Tooltip>
         </Polygon>
 
-        {/* Secondary Pack Ice Hazard (Only visible in Live Env Mode) */}
         {liveEnvironment && (
           <Polygon positions={packIcePolygon} pathOptions={{ color: '#93c5fd', weight: 2, fillColor: '#93c5fd', fillOpacity: 0.4, dashArray: '4, 4' }}>
             <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-blue-300 font-bold text-[10px] uppercase tracking-widest pointer-events-none">
@@ -185,10 +201,7 @@ export default function App() {
           </>
         )}
 
-        {riskRoute.length > 0 && (
-          <Polyline positions={riskRoute} className="route-danger-glow" pathOptions={{ color: '#ff2a4d', weight: 2, dashArray: '8, 10', opacity: 0.8 }} />
-        )}
-
+        {riskRoute.length > 0 && <Polyline positions={riskRoute} className="route-danger-glow" pathOptions={{ color: '#ff2a4d', weight: 2, dashArray: '8, 10', opacity: 0.8 }} />}
         {safeRoute.length > 0 && (
           <>
             <Polyline positions={safeRoute} pathOptions={{ color: '#00f0ff', weight: 9, opacity: 0.3, lineCap: 'round', lineJoin: 'round' }} />
@@ -218,7 +231,6 @@ export default function App() {
               <select value={origin} onChange={(e) => setOrigin(e.target.value)} className="w-full bg-[#050a14]/80 border border-white/15 rounded-xl px-3 py-2 text-xs text-white outline-none appearance-none cursor-pointer">
                 <option value="CPT">Cape Town (CPT)</option>
               </select>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">▼</div>
             </div>
           </div>
           <div>
@@ -228,7 +240,6 @@ export default function App() {
                 <option value="BHR">Bharati Station (BHR)</option>
                 <option value="MAI">Maitri Station (MAI)</option>
               </select>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">▼</div>
             </div>
           </div>
 
@@ -237,26 +248,18 @@ export default function App() {
             {isOptimizing ? 'COMPUTING...' : 'ACTIVATE ROUTE'}
           </button>
 
-          {/* NEW: LIVE SATELLITE SYNC TOGGLE */}
           <div className="flex gap-2 mt-2">
             <button 
-              onClick={() => {
-                setLiveEnvironment(!liveEnvironment);
-                setSwarmActive(false); // Turn off swarm to avoid visual clutter
-              }} 
+              onClick={triggerWeatherGPT} 
               className={`flex-1 py-2 px-2 border rounded-xl text-[9px] font-bold tracking-widest uppercase transition-all duration-300 flex flex-col items-center justify-center gap-1 ${
-                liveEnvironment ? 'bg-blue-500/20 border-blue-500/60 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.2)]' : 'bg-slate-800/40 border-slate-600 hover:border-slate-400 text-slate-300'
+                liveEnvironment ? 'bg-purple-500/20 border-purple-500/60 text-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.2)]' : 'bg-slate-800/40 border-slate-600 hover:border-slate-400 text-slate-300'
               }`}
             >
-              <Satellite size={14} className={liveEnvironment ? 'animate-pulse' : ''} />
-              {liveEnvironment ? 'SAT SYNC ON' : 'SYNC METEOSAT'}
+              <Cpu size={14} className={isAiTyping ? 'animate-pulse' : ''} />
+              {liveEnvironment ? 'WEATHER GPT ON' : 'RUN WEATHER GPT'}
             </button>
-
             <button 
-              onClick={() => {
-                setSwarmActive(!swarmActive);
-                setLiveEnvironment(false);
-              }} 
+              onClick={() => { setSwarmActive(!swarmActive); setLiveEnvironment(false); setShowAiTerminal(false); }} 
               disabled={metrics.status !== "ACTIVE"}
               className={`flex-1 py-2 px-2 border rounded-xl text-[9px] font-bold tracking-widest uppercase transition-all duration-300 flex flex-col items-center justify-center gap-1 ${
                 metrics.status !== "ACTIVE" ? 'bg-slate-800/20 border-slate-700 text-slate-600 cursor-not-allowed' :
@@ -270,6 +273,25 @@ export default function App() {
         </div>
       </div>
 
+      {/* NEW: BOTTOM-LEFT WEATHER GPT TERMINAL */}
+      {showAiTerminal && (
+        <div className="absolute bottom-8 left-8 z-[1000] w-80 bg-[#0a0f1d]/85 backdrop-blur-2xl border border-purple-500/40 rounded-2xl p-4 shadow-[0_15px_45px_rgba(168,85,247,0.15)] animate-in fade-in slide-in-from-left-4 duration-300">
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-purple-500/20">
+            <div className="flex items-center gap-2 text-purple-400">
+              <Terminal size={14} />
+              <h2 className="text-xs font-bold tracking-widest uppercase">LLM Meteorological Analysis</h2>
+            </div>
+            <button onClick={() => setShowAiTerminal(false)} className="text-slate-400 hover:text-white">✕</button>
+          </div>
+          <div className="h-40 overflow-y-auto pr-2">
+            <p className="text-[10px] text-cyan-300 whitespace-pre-wrap font-mono leading-relaxed">
+              {aiText}
+              {isAiTyping && <span className="inline-block w-1.5 h-3 ml-1 bg-cyan-300 animate-pulse"></span>}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* TOP-RIGHT ICEBERG INTEL PANEL */}
       {showIntel && (
         <div className="absolute top-8 right-8 z-[1000] w-72 bg-[#0a0f1d]/75 backdrop-blur-2xl border border-red-500/30 rounded-2xl p-4 shadow-[0_15px_45px_rgba(255,42,77,0.15)] animate-in fade-in slide-in-from-right-4 duration-300">
@@ -280,24 +302,11 @@ export default function App() {
             </div>
             <button onClick={() => setShowIntel(false)} className="text-slate-400 hover:text-white">✕</button>
           </div>
-          
           <div className="space-y-2 text-[10px] tracking-wider">
-            <div className="flex justify-between border-b border-white/5 pb-1">
-              <span className="text-slate-400">DATA SOURCE:</span>
-              <span className="text-cyan-300">IIT-M / NCPOR (2025)</span>
-            </div>
-            <div className="flex justify-between border-b border-white/5 pb-1">
-              <span className="text-slate-400">VISIBLE MASS:</span>
-              <span className="text-white">12.5%</span>
-            </div>
-            <div className="flex justify-between border-b border-white/5 pb-1">
-              <span className="text-slate-400">UNDERWATER DRAFT:</span>
-              <span className="text-red-400 font-bold">280 METERS (CRITICAL)</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">DRIFT TRAJECTORY:</span>
-              <span className="text-amber-300">{liveEnvironment ? '1.4 kts NE (ACCELERATING)' : '0.8 kts NW'}</span>
-            </div>
+            <div className="flex justify-between border-b border-white/5 pb-1"><span className="text-slate-400">DATA SOURCE:</span><span className="text-cyan-300">IIT-M / NCPOR</span></div>
+            <div className="flex justify-between border-b border-white/5 pb-1"><span className="text-slate-400">VISIBLE MASS:</span><span className="text-white">12.5%</span></div>
+            <div className="flex justify-between border-b border-white/5 pb-1"><span className="text-slate-400">UNDERWATER DRAFT:</span><span className="text-red-400 font-bold">280 METERS (CRITICAL)</span></div>
+            <div className="flex justify-between"><span className="text-slate-400">DRIFT TRAJECTORY:</span><span className="text-amber-300">{liveEnvironment ? '1.4 kts NE (ACCELERATING)' : '0.8 kts NW'}</span></div>
           </div>
         </div>
       )}
