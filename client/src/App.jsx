@@ -4,7 +4,7 @@ import L from 'leaflet';
 import axios from 'axios';
 import 'leaflet/dist/leaflet.css';
 import { 
-  Anchor, Compass, Gauge, Waves, Droplets, ShieldCheck, Navigation2, Activity, Layers, Info, Database
+  Anchor, Compass, Gauge, Waves, Droplets, ShieldCheck, Navigation2, Activity, Layers, Database, Wifi
 } from 'lucide-react';
 
 const createTacticalIcon = (label, color = '#00f0ff') => {
@@ -32,7 +32,10 @@ export default function App() {
   const [origin, setOrigin] = useState('CPT');
   const [destination, setDestination] = useState('BHR');
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [showIntel, setShowIntel] = useState(false); // Controls the new Iceberg Data panel
+  const [showIntel, setShowIntel] = useState(false);
+  
+  // NEW: Swarm Intelligence State
+  const [swarmActive, setSwarmActive] = useState(false);
 
   const [safeRoute, setSafeRoute] = useState([]);
   const [riskRoute, setRiskRoute] = useState([]);
@@ -47,18 +50,14 @@ export default function App() {
     riskColor: "text-slate-400"
   });
 
-  // Dynamic Live Sensor States
   const [liveSpeed, setLiveSpeed] = useState(18.2);
   const [liveCurrent, setLiveCurrent] = useState(1.1);
 
-  // Fluctuating Data Effect: Runs only when the route is ACTIVE
   useEffect(() => {
     let interval;
     if (metrics.status === "ACTIVE") {
       interval = setInterval(() => {
-        // Randomize speed slightly between 17.5 and 18.5
         setLiveSpeed((17.5 + Math.random() * 1.0).toFixed(1));
-        // Randomize ocean current between 0.8 and 1.4
         setLiveCurrent((0.8 + Math.random() * 0.6).toFixed(1));
       }, 2000);
     } else {
@@ -76,6 +75,18 @@ export default function App() {
 
   const a23aPolygon = [
     [-59.0, 42.0], [-58.5, 54.0], [-62.5, 58.0], [-65.0, 52.0], [-64.0, 38.0]
+  ];
+
+  // NEW: Dynamic Swarm Hazard (Flash Freeze detected by lead ship)
+  const flashFreezePolygon = [
+    [-61.5, 48.0], [-61.0, 52.0], [-63.5, 53.5], [-64.0, 49.0]
+  ];
+
+  // NEW: Tactical Detour calculated to avoid the Flash Freeze
+  const tacticalDetour = [
+    [-58.0, 41.0], // Branches off safeRoute
+    [-59.5, 55.0], // Swings wide east
+    [-65.2, 57.0], // Reconnects with safeRoute
   ];
 
   const handleOptimize = async () => {
@@ -112,9 +123,9 @@ export default function App() {
       <MapContainer center={mapCenter} zoom={3.5} minZoom={2} maxZoom={7} zoomControl={false} className="w-full h-full z-0">
         <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" maxZoom={18} />
 
+        {/* Core A-23a Hazard */}
         <Polygon 
           positions={a23aPolygon} 
-          // Click handler to open the HOD's requested data panel
           eventHandlers={{ click: () => setShowIntel(!showIntel) }} 
           pathOptions={{ color: '#ff2a4d', weight: 2, fillColor: '#ff2a4d', fillOpacity: 0.35, dashArray: '6, 6', className: 'cursor-pointer' }}
         >
@@ -123,6 +134,23 @@ export default function App() {
           </Tooltip>
         </Polygon>
 
+        {/* SWARM LINK: Dynamic Hazard & Detour */}
+        {swarmActive && safeRoute.length > 0 && (
+          <>
+            <Polygon positions={flashFreezePolygon} pathOptions={{ color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.4, dashArray: '4, 4' }}>
+              <Tooltip permanent direction="center" className="bg-transparent border-none shadow-none text-amber-400 font-bold text-xs uppercase tracking-widest pointer-events-none">
+                Flash Freeze Detected
+              </Tooltip>
+            </Polygon>
+            
+            <Polyline positions={tacticalDetour} pathOptions={{ color: '#f59e0b', weight: 4, dashArray: '8, 8', opacity: 0.9, lineCap: 'round' }} />
+            
+            {/* Lead Icebreaker Marker */}
+            <Marker position={[-60.5, 46.0]} icon={createTacticalIcon('Lead Icebreaker', '#f59e0b')} />
+          </>
+        )}
+
+        {/* Base Routes */}
         {riskRoute.length > 0 && (
           <Polyline positions={riskRoute} className="route-danger-glow" pathOptions={{ color: '#ff2a4d', weight: 2, dashArray: '8, 10', opacity: 0.8 }} />
         )}
@@ -130,7 +158,7 @@ export default function App() {
         {safeRoute.length > 0 && (
           <>
             <Polyline positions={safeRoute} pathOptions={{ color: '#00f0ff', weight: 9, opacity: 0.3, lineCap: 'round', lineJoin: 'round' }} />
-            <Polyline positions={safeRoute} className="route-glow" pathOptions={{ color: '#ffffff', weight: 3.5, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }} />
+            <Polyline positions={safeRoute} className="route-glow" pathOptions={{ color: '#ffffff', weight: 3.5, opacity: swarmActive ? 0.4 : 0.95, lineCap: 'round', lineJoin: 'round' }} />
           </>
         )}
 
@@ -174,10 +202,23 @@ export default function App() {
             <Navigation2 size={14} className={isOptimizing ? 'animate-spin' : 'rotate-45'} />
             {isOptimizing ? 'COMPUTING...' : 'ACTIVATE ROUTE'}
           </button>
+
+          {/* NEW: Swarm Intelligence Toggle */}
+          <button 
+            onClick={() => setSwarmActive(!swarmActive)} 
+            disabled={metrics.status !== "ACTIVE"}
+            className={`w-full mt-1 py-2 px-4 border rounded-xl text-[10px] font-bold tracking-widest uppercase transition-all duration-300 flex items-center justify-center gap-2 ${
+              metrics.status !== "ACTIVE" ? 'bg-slate-800/20 border-slate-700 text-slate-600 cursor-not-allowed' :
+              swarmActive ? 'bg-amber-500/20 border-amber-500/60 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-slate-800/40 border-slate-600 hover:border-slate-400 text-slate-300'
+            }`}
+          >
+            <Wifi size={12} className={swarmActive ? 'animate-pulse' : ''} />
+            {swarmActive ? 'SWARM DATA LINK ACTIVE' : 'ENABLE SWARM LINK'}
+          </button>
         </div>
       </div>
 
-      {/* NEW: TOP-RIGHT ICEBERG INTEL PANEL (Shows when polygon is clicked) */}
+      {/* TOP-RIGHT ICEBERG INTEL PANEL */}
       {showIntel && (
         <div className="absolute top-8 right-8 z-[1000] w-72 bg-[#0a0f1d]/75 backdrop-blur-2xl border border-red-500/30 rounded-2xl p-4 shadow-[0_15px_45px_rgba(255,42,77,0.15)] animate-in fade-in slide-in-from-right-4 duration-300">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-red-500/20">
@@ -194,7 +235,7 @@ export default function App() {
               <span className="text-cyan-300">IIT-M / NCPOR (2025)</span>
             </div>
             <div className="flex justify-between border-b border-white/5 pb-1">
-              <span className="text-slate-400">VISIBLE SURFACE MASS:</span>
+              <span className="text-slate-400">VISIBLE MASS:</span>
               <span className="text-white">12.5%</span>
             </div>
             <div className="flex justify-between border-b border-white/5 pb-1">
@@ -207,7 +248,7 @@ export default function App() {
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">DRIFT TRAJECTORY:</span>
-              <span className="text-amber-300">0.8 kts NW (Shifting)</span>
+              <span className="text-amber-300">0.8 kts NW</span>
             </div>
           </div>
         </div>
@@ -233,7 +274,6 @@ export default function App() {
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><Gauge size={10} className="text-cyan-400" /> Speed</span>
-            {/* Now using dynamic liveSpeed state */}
             <p className="text-xs font-bold text-white mt-1">{liveSpeed} <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
@@ -242,7 +282,6 @@ export default function App() {
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
             <span className="text-[9px] text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans"><Waves size={10} className="text-cyan-400" /> Current</span>
-            {/* Now using dynamic liveCurrent state */}
             <p className="text-xs font-bold text-white mt-1">{liveCurrent} <span className="text-[9px] text-slate-400 font-normal">kts</span></p>
           </div>
           <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
@@ -263,8 +302,8 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-slate-400">RISK:</span>
-            <span className={`px-2 py-0.5 rounded border font-bold text-[9px] ${metrics.risk === 'SAFE TRAJECTORY' ? 'bg-cyan-400/10 border-cyan-400/40 text-cyan-300' : 'bg-red-500/10 border-red-500/40 text-red-500'}`}>
-              {metrics.risk}
+            <span className={`px-2 py-0.5 rounded border font-bold text-[9px] ${swarmActive ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : (metrics.risk === 'SAFE TRAJECTORY' ? 'bg-cyan-400/10 border-cyan-400/40 text-cyan-300' : 'bg-red-500/10 border-red-500/40 text-red-500')}`}>
+              {swarmActive ? 'DETOUR ENGAGED' : metrics.risk}
             </span>
           </div>
         </div>
